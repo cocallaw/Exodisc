@@ -1,8 +1,16 @@
 BeforeAll {
+    $originalErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Stop"
     . (Join-Path $PSScriptRoot ".." "Import-FromDisc.ps1")
+    $errorActionPreferenceAfterDotSource = $ErrorActionPreference
+    $ErrorActionPreference = $originalErrorActionPreference
 }
 
 Describe "Copy-VerifiedFile" {
+    It "does not change the caller error preference when dot-sourced" {
+        $errorActionPreferenceAfterDotSource | Should -Be "Stop"
+    }
+
     It "copies a file and returns matching SHA256 hashes" {
         $source = Join-Path $TestDrive "source.bin"
         $destination = Join-Path $TestDrive "destination.bin"
@@ -32,6 +40,7 @@ Describe "Copy-VerifiedFile" {
         $result.IsMatch | Should -BeFalse
         $result.SourceHash | Should -Be "SOURCE_HASH"
         $result.DestinationHash | Should -Be "DESTINATION_HASH"
+        Test-Path -LiteralPath $destination | Should -BeTrue
         Should -Invoke Get-FileHash -Times 2 -Exactly
     }
 
@@ -43,5 +52,6 @@ Describe "Copy-VerifiedFile" {
 
         { Copy-VerifiedFile -SourcePath $source -DestinationPath $destination } |
             Should -Throw "*hash failed*"
+        Test-Path -LiteralPath $destination | Should -BeTrue
     }
 }

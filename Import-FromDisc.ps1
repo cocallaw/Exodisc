@@ -22,11 +22,6 @@ param(
     [string[]]$Extensions = @("*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.png")
 )
 
-$ErrorActionPreference = "Continue"
-$logPath = Join-Path $Target "_import_log.csv"
-$exifToolAvailable = $null -ne (Get-Command exiftool.exe -ErrorAction SilentlyContinue) -or
-                     $null -ne (Get-Command exiftool -ErrorAction SilentlyContinue)
-
 function Write-Log {
     param($Disc, $SourceFile, $DestFile, $Status, $Detail)
     $line = '"{0}","{1}","{2}","{3}","{4}","{5}"' -f `
@@ -72,6 +67,10 @@ if ($MyInvocation.InvocationName -eq '.') {
     return
 }
 
+$ErrorActionPreference = "Continue"
+$logPath = Join-Path $Target "_import_log.csv"
+$exifToolAvailable = $null -ne (Get-Command exiftool.exe -ErrorAction SilentlyContinue) -or
+                     $null -ne (Get-Command exiftool -ErrorAction SilentlyContinue)
 New-Item -ItemType Directory -Path $Target -Force | Out-Null
 
 if (-not (Test-Path $logPath)) {
@@ -122,6 +121,8 @@ while ($true) {
         $usedNames = @{}
 
         foreach ($file in $files) {
+            $destPath = ""
+
             try {
                 $dateStr = Get-PhotoDate -FilePath $file.FullName
                 $ext = $file.Extension.ToLower()
@@ -151,8 +152,8 @@ while ($true) {
                 Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile $destPath -Status "OK" -Detail ""
                 $count++
             } catch {
-                Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile "" -Status "ERROR" -Detail $_.Exception.Message
-                Write-Host "  FAILED to copy: $($file.FullName)  -  $($_.Exception.Message)" -ForegroundColor Red
+                Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile $destPath -Status "ERROR" -Detail $_.Exception.Message
+                Write-Host "  FAILED to copy or verify: $($file.FullName)  -  $($_.Exception.Message)" -ForegroundColor Red
                 $errorCount++
             }
         }
