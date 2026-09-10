@@ -22,27 +22,11 @@ param(
     [string[]]$Extensions = @("*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.png")
 )
 
-$ErrorActionPreference = "Continue"
-$logPath = Join-Path $Target "_import_log.csv"
-New-Item -ItemType Directory -Path $Target -Force | Out-Null
-
-if (-not (Test-Path $logPath)) {
-    "Timestamp,Disc,SourceFile,DestFile,Status,Detail" | Out-File -FilePath $logPath -Encoding UTF8
-}
-
 function Write-Log {
     param($Disc, $SourceFile, $DestFile, $Status, $Detail)
     $line = '"{0}","{1}","{2}","{3}","{4}","{5}"' -f `
         (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Disc, $SourceFile, $DestFile, $Status, $Detail
     Add-Content -Path $logPath -Value $line
-}
-
-$exifToolAvailable = $null -ne (Get-Command exiftool.exe -ErrorAction SilentlyContinue) -or
-                      $null -ne (Get-Command exiftool -ErrorAction SilentlyContinue)
-
-if (-not $exifToolAvailable) {
-    Write-Host "NOTE: ExifTool not found on PATH - falling back to file modified-date for naming." -ForegroundColor Yellow
-    Write-Host "      For accurate 'date taken' renaming, install it from https://exiftool.org" -ForegroundColor Yellow
 }
 
 function Get-PhotoDate {
@@ -59,6 +43,43 @@ function Get-PhotoDate {
 
     # Fallback: file's last-write time (best we can do without EXIF)
     return (Get-Item $FilePath).LastWriteTime.ToString("yyyy-MM-dd_HHmmss")
+}
+
+function Copy-VerifiedFile {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -ErrorAction Stop
+
+    $sourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256 -ErrorAction Stop).Hash
+    $destinationHash = (Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256 -ErrorAction Stop).Hash
+
+    [pscustomobject]@{
+        SourceHash      = $sourceHash
+        DestinationHash = $destinationHash
+        IsMatch         = $sourceHash -eq $destinationHash
+    }
+}
+
+if ($MyInvocation.InvocationName -eq '.') {
+    return
+}
+
+$ErrorActionPreference = "Continue"
+$logPath = Join-Path $Target "_import_log.csv"
+$exifToolAvailable = $null -ne (Get-Command exiftool.exe -ErrorAction SilentlyContinue) -or
+                     $null -ne (Get-Command exiftool -ErrorAction SilentlyContinue)
+New-Item -ItemType Directory -Path $Target -Force | Out-Null
+
+if (-not (Test-Path $logPath)) {
+    "Timestamp,Disc,SourceFile,DestFile,Status,Detail" | Out-File -FilePath $logPath -Encoding UTF8
+}
+
+if (-not $exifToolAvailable) {
+    Write-Host "NOTE: ExifTool not found on PATH - falling back to file modified-date for naming." -ForegroundColor Yellow
+    Write-Host "      For accurate 'date taken' renaming, install it from https://exiftool.org" -ForegroundColor Yellow
 }
 
 Write-Host "Watching $DriveLetter for discs. Press Ctrl+C to stop." -ForegroundColor Cyan
@@ -100,6 +121,8 @@ while ($true) {
         $usedNames = @{}
 
         foreach ($file in $files) {
+            $destPath = ""
+
             try {
                 $dateStr = Get-PhotoDate -FilePath $file.FullName
                 $ext = $file.Extension.ToLower()
@@ -114,13 +137,23 @@ while ($true) {
                 }
 
                 $destPath = Join-Path $destRoot $baseName
-                Copy-Item -Path $file.FullName -Destination $destPath -ErrorAction Stop
+                $verification = Copy-VerifiedFile -SourcePath $file.FullName -DestinationPath $destPath
+
+                if (-not $verification.IsMatch) {
+                    $detail = "SourceHash=$($verification.SourceHash); DestinationHash=$($verification.DestinationHash)"
+                    Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile $destPath -Status "HASH_MISMATCH" -Detail $detail
+                    Write-Host "  HASH MISMATCH: $($file.FullName)  ->  $destPath" -ForegroundColor Red
+                    Write-Host "    Source:      $($verification.SourceHash)" -ForegroundColor Red
+                    Write-Host "    Destination: $($verification.DestinationHash)" -ForegroundColor Red
+                    $errorCount++
+                    continue
+                }
 
                 Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile $destPath -Status "OK" -Detail ""
                 $count++
             } catch {
-                Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile "" -Status "ERROR" -Detail $_.Exception.Message
-                Write-Host "  FAILED to copy: $($file.FullName)  -  $($_.Exception.Message)" -ForegroundColor Red
+                Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile $destPath -Status "ERROR" -Detail $_.Exception.Message
+                Write-Host "  FAILED to copy or verify: $($file.FullName)  -  $($_.Exception.Message)" -ForegroundColor Red
                 $errorCount++
             }
         }
