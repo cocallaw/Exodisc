@@ -9,6 +9,11 @@
     files. Each disc gets its own destination folder. Read errors (common on
     aging CD-Rs) are logged to a CSV.
 
+    By default the entire disc is scanned recursively. Use -IncludePaths to
+    restrict the scan to one or more subfolders (still scanned recursively)
+    when a disc has duplicate/low-resolution copies of the same photos in
+    other folders.
+
 .NOTES
     - Uses ExifTool if it's installed and on PATH (recommended, most accurate).
       Download: https://exiftool.org  (just needs to be exiftool.exe somewhere on PATH)
@@ -21,7 +26,14 @@ param(
     [string]$DriveLetter = "D:",
     [string[]]$Extensions = @("*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.png"),
     [ValidateRange(1, [int]::MaxValue)]
-    [int]$EstimatedDiscCount
+    [int]$EstimatedDiscCount,
+    # Optional list of subfolders (relative to the drive root, e.g. "DCIM\100CANON")
+    # to scan instead of the whole disc. Each path is still scanned recursively.
+    # Useful when a disc has multiple copies of the same photos (e.g. a low-resolution
+    # "web" folder alongside the originals) and only one copy should be imported.
+    # Applies to every disc processed during this run. Leave empty (default) to scan
+    # the entire disc, matching prior behavior.
+    [string[]]$IncludePaths = @()
 )
 
 function Write-Log {
@@ -62,6 +74,53 @@ function Copy-VerifiedFile {
         SourceHash      = $sourceHash
         DestinationHash = $destinationHash
         IsMatch         = $sourceHash -eq $destinationHash
+    }
+}
+
+function Get-DiscPhotoFiles {
+    param(
+        [string]$DriveLetter,
+        [string[]]$Extensions,
+        [string[]]$IncludePaths = @()
+    )
+
+    $files = @()
+    $enumerationErrors = @()
+    $warnings = @()
+
+    $scanRoots = @($DriveLetter)
+    if ($IncludePaths -and $IncludePaths.Count -gt 0) {
+        $scanRoots = @()
+        foreach ($includePath in $IncludePaths) {
+            $fullPath = Join-Path $DriveLetter $includePath
+            if (Test-Path -LiteralPath $fullPath -PathType Container) {
+                $scanRoots += $fullPath
+            } else {
+                $warnings += "Include path not found on disc, skipping: '$includePath' (resolved to '$fullPath')"
+            }
+        }
+    }
+
+    foreach ($root in $scanRoots) {
+        foreach ($ext in $Extensions) {
+            try {
+                $files += Get-ChildItem -Path $root -Recurse -Filter $ext -File `
+                    -ErrorAction SilentlyContinue -ErrorVariable +enumerationErrors
+            } catch {
+                $enumerationErrors += $_
+            }
+        }
+    }
+
+    # Overlapping/nested include paths can surface the same file more than once.
+    if ($files.Count -gt 0) {
+        $files = $files | Sort-Object -Property FullName -Unique
+    }
+
+    [pscustomobject]@{
+        Files             = $files
+        EnumerationErrors = $enumerationErrors
+        Warnings          = $warnings
     }
 }
 
@@ -147,18 +206,16 @@ while ($true) {
         $count = 0
         $errorCount = 0
         $usedNames = @{}
-        $files = @()
-        $enumerationErrors = @()
-        foreach ($ext in $Extensions) {
-            try {
-                $files += Get-ChildItem -Path $DriveLetter -Recurse -Filter $ext -File `
-                    -ErrorAction SilentlyContinue -ErrorVariable +enumerationErrors
-            } catch {
-                $enumerationErrors += $_
-            }
+
+        $scanResult = Get-DiscPhotoFiles -DriveLetter $DriveLetter -Extensions $Extensions -IncludePaths $IncludePaths
+        $files = $scanResult.Files
+
+        foreach ($warning in $scanResult.Warnings) {
+            Write-Host "  WARNING: $warning" -ForegroundColor Yellow
+            Write-Log -Disc $discFolderName -SourceFile "" -DestFile "" -Status "WARN" -Detail $warning
         }
 
-        foreach ($enumerationError in $enumerationErrors) {
+        foreach ($enumerationError in $scanResult.EnumerationErrors) {
             Write-Log -Disc $discFolderName -SourceFile $enumerationError.TargetObject -DestFile "" `
                 -Status "ERROR" -Detail $enumerationError.Exception.Message
             $errorCount++

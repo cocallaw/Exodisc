@@ -56,6 +56,65 @@ Describe "Copy-VerifiedFile" {
     }
 }
 
+Describe "Get-DiscPhotoFiles" {
+    BeforeEach {
+        $driveRoot = Join-Path $TestDrive "disc"
+        New-Item -ItemType Directory -Path $driveRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $driveRoot "Originals") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $driveRoot "Originals\Sub") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $driveRoot "Web") -Force | Out-Null
+
+        Set-Content -LiteralPath (Join-Path $driveRoot "Originals\photo1.jpg") -Value "a"
+        Set-Content -LiteralPath (Join-Path $driveRoot "Originals\Sub\photo2.jpg") -Value "b"
+        Set-Content -LiteralPath (Join-Path $driveRoot "Web\photo1_lowres.jpg") -Value "c"
+
+        $extensions = @("*.jpg")
+    }
+
+    It "scans the whole disc recursively when no IncludePaths are given (default behavior)" {
+        $result = Get-DiscPhotoFiles -DriveLetter $driveRoot -Extensions $extensions -IncludePaths @()
+
+        $result.Files.Count | Should -Be 3
+        $result.Warnings.Count | Should -Be 0
+    }
+
+    It "only returns files under a single include path, recursively" {
+        $result = Get-DiscPhotoFiles -DriveLetter $driveRoot -Extensions $extensions -IncludePaths @("Originals")
+
+        $result.Files.Count | Should -Be 2
+        ($result.Files.FullName | Sort-Object) | Should -Be (
+            (Join-Path $driveRoot "Originals\Sub\photo2.jpg"),
+            (Join-Path $driveRoot "Originals\photo1.jpg") | Sort-Object
+        )
+        $result.Warnings.Count | Should -Be 0
+    }
+
+    It "unions files from multiple include paths without duplicates" {
+        $result = Get-DiscPhotoFiles -DriveLetter $driveRoot -Extensions $extensions `
+            -IncludePaths @("Originals", "Web")
+
+        $result.Files.Count | Should -Be 3
+        $result.Warnings.Count | Should -Be 0
+    }
+
+    It "warns and skips an include path that does not exist, but still scans valid paths" {
+        $result = Get-DiscPhotoFiles -DriveLetter $driveRoot -Extensions $extensions `
+            -IncludePaths @("Originals", "DoesNotExist")
+
+        $result.Files.Count | Should -Be 2
+        $result.Warnings.Count | Should -Be 1
+        $result.Warnings[0] | Should -Match "DoesNotExist"
+    }
+
+    It "does not double-count files when include paths overlap/nest" {
+        $result = Get-DiscPhotoFiles -DriveLetter $driveRoot -Extensions $extensions `
+            -IncludePaths @("Originals", "Originals\Sub")
+
+        $result.Files.Count | Should -Be 2
+        $result.Warnings.Count | Should -Be 0
+    }
+}
+
 Describe "Write-SessionProgress" {
     BeforeEach {
         Mock Write-Progress
