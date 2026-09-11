@@ -158,10 +158,8 @@ while ($true) {
             }
         }
 
-        $enumerationErrors = $enumerationErrors |
-            Sort-Object -Property { $_.Exception.Message } -Unique
         foreach ($enumerationError in $enumerationErrors) {
-            Write-Log -Disc $discFolderName -SourceFile "(enumeration)" -DestFile "" `
+            Write-Log -Disc $discFolderName -SourceFile $enumerationError.TargetObject -DestFile "" `
                 -Status "ERROR" -Detail $enumerationError.Exception.Message
             $errorCount++
             $totalErrors++
