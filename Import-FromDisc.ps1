@@ -19,7 +19,9 @@
 param(
     [string]$Target = "C:\Photos\Import",
     [string]$DriveLetter = "D:",
-    [string[]]$Extensions = @("*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.png")
+    [string[]]$Extensions = @("*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.png"),
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$EstimatedDiscCount
 )
 
 function Write-Log {
@@ -63,6 +65,40 @@ function Copy-VerifiedFile {
     }
 }
 
+function Write-SessionProgress {
+    param(
+        [int]$CompletedDiscs,
+        [int]$ImportedPhotos,
+        [int]$Errors,
+        [int]$CurrentFile,
+        [int]$CurrentFileCount,
+        [int]$EstimatedDiscCount
+    )
+
+    $percentComplete = -1
+    $discText = "$CompletedDiscs discs completed"
+    $fileText = ""
+
+    if ($CurrentFileCount -gt 0) {
+        $currentDisc = $CompletedDiscs + 1
+        $discText = "Disc $currentDisc in progress"
+        $fileText = ", file $CurrentFile of $CurrentFileCount"
+    }
+
+    if ($EstimatedDiscCount -gt 0) {
+        $discProgress = if ($CurrentFileCount -gt 0) { $CurrentFile / $CurrentFileCount } else { 0 }
+        $currentDisc = if ($CurrentFileCount -gt 0) { $CompletedDiscs + 1 } else { $CompletedDiscs }
+        $discText = "Disc $currentDisc of ~$EstimatedDiscCount"
+        $percentComplete = [Math]::Min(
+            100,
+            [Math]::Floor((($CompletedDiscs + $discProgress) / $EstimatedDiscCount) * 100)
+        )
+    }
+
+    $status = "$discText$fileText, $ImportedPhotos photos imported, $Errors errors"
+    Write-Progress -Activity "Importing discs" -Status $status -PercentComplete $percentComplete
+}
+
 if ($MyInvocation.InvocationName -eq '.') {
     return
 }
@@ -84,6 +120,12 @@ if (-not $exifToolAvailable) {
 
 Write-Host "Watching $DriveLetter for discs. Press Ctrl+C to stop." -ForegroundColor Cyan
 
+$completedDiscs = 0
+$totalImported = 0
+$totalErrors = 0
+Write-SessionProgress -CompletedDiscs $completedDiscs -ImportedPhotos $totalImported `
+    -Errors $totalErrors -EstimatedDiscCount $EstimatedDiscCount
+
 while ($true) {
     if (Test-Path $DriveLetter) {
         Start-Sleep -Seconds 2  # let the drive finish spinning up / mounting
@@ -102,13 +144,25 @@ while ($true) {
 
         Write-Host "`nDisc detected: $volLabel  ->  $destRoot" -ForegroundColor Green
 
+        $count = 0
+        $errorCount = 0
+        $usedNames = @{}
         $files = @()
+        $enumerationErrors = @()
         foreach ($ext in $Extensions) {
             try {
-                $files += Get-ChildItem -Path $DriveLetter -Recurse -Filter $ext -File -ErrorAction SilentlyContinue
+                $files += Get-ChildItem -Path $DriveLetter -Recurse -Filter $ext -File `
+                    -ErrorAction SilentlyContinue -ErrorVariable +enumerationErrors
             } catch {
-                Write-Log -Disc $discFolderName -SourceFile "(enumeration)" -DestFile "" -Status "ERROR" -Detail $_.Exception.Message
+                $enumerationErrors += $_
             }
+        }
+
+        foreach ($enumerationError in $enumerationErrors) {
+            Write-Log -Disc $discFolderName -SourceFile $enumerationError.TargetObject -DestFile "" `
+                -Status "ERROR" -Detail $enumerationError.Exception.Message
+            $errorCount++
+            $totalErrors++
         }
 
         if ($files.Count -eq 0) {
@@ -116,9 +170,7 @@ while ($true) {
             Write-Log -Disc $discFolderName -SourceFile "" -DestFile "" -Status "EMPTY" -Detail "No matching files found"
         }
 
-        $count = 0
-        $errorCount = 0
-        $usedNames = @{}
+        $processedFiles = 0
 
         foreach ($file in $files) {
             $destPath = ""
@@ -146,15 +198,23 @@ while ($true) {
                     Write-Host "    Source:      $($verification.SourceHash)" -ForegroundColor Red
                     Write-Host "    Destination: $($verification.DestinationHash)" -ForegroundColor Red
                     $errorCount++
+                    $totalErrors++
                     continue
                 }
 
                 Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile $destPath -Status "OK" -Detail ""
                 $count++
+                $totalImported++
             } catch {
                 Write-Log -Disc $discFolderName -SourceFile $file.FullName -DestFile $destPath -Status "ERROR" -Detail $_.Exception.Message
                 Write-Host "  FAILED to copy or verify: $($file.FullName)  -  $($_.Exception.Message)" -ForegroundColor Red
                 $errorCount++
+                $totalErrors++
+            } finally {
+                $processedFiles++
+                Write-SessionProgress -CompletedDiscs $completedDiscs -ImportedPhotos $totalImported `
+                    -Errors $totalErrors -CurrentFile $processedFiles -CurrentFileCount $files.Count `
+                    -EstimatedDiscCount $EstimatedDiscCount
             }
         }
 
@@ -162,6 +222,10 @@ while ($true) {
         if ($errorCount -gt 0) {
             Write-Host "  Errors were logged to $logPath - this disc may be degraded. Consider re-scanning." -ForegroundColor Yellow
         }
+
+        $completedDiscs++
+        Write-SessionProgress -CompletedDiscs $completedDiscs -ImportedPhotos $totalImported `
+            -Errors $totalErrors -EstimatedDiscCount $EstimatedDiscCount
 
         Write-Host "  Eject the disc and insert the next one (or Ctrl+C to stop)..." -ForegroundColor Cyan
         do { Start-Sleep -Seconds 2 } while (Test-Path $DriveLetter)
