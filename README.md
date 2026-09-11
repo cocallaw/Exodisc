@@ -43,13 +43,24 @@ To customize the source drive, destination folder, or file types:
 ./Import-FromDisc.ps1 -DriveLetter "E:" -Target "D:\PhotoImports" -Extensions "*.jpg", "*.png"
 ```
 
+Use `-EstimatedDiscCount` to show estimated session completion while files are
+copied:
+
+```powershell
+./Import-FromDisc.ps1 -EstimatedDiscCount 20
+```
+
+Without an estimate, progress still shows the current or completed disc count,
+total imported photos, and total errors without a percentage.
+
 ### Parameters
 
-| Parameter      | Default                                              | Description                                  |
-| -------------- | ----------------------------------------------------- | --------------------------------------------- |
-| `-Target`      | `C:\Photos\Import`                                    | Destination root folder for imported photos.  |
-| `-DriveLetter` | `D:`                                                   | Drive letter to watch for discs.               |
-| `-Extensions`  | `*.jpg`, `*.jpeg`, `*.tif`, `*.tiff`, `*.png`          | File patterns to copy from each disc.          |
+| Parameter             | Default                                     | Description                                      |
+| --------------------- | ------------------------------------------- | ------------------------------------------------ |
+| `-Target`             | `C:\Photos\Import`                           | Destination root folder for imported photos.     |
+| `-DriveLetter`        | `D:`                                          | Drive letter to watch for discs.                  |
+| `-Extensions`         | `*.jpg`, `*.jpeg`, `*.tif`, `*.tiff`, `*.png` | File patterns to copy from each disc.             |
+| `-EstimatedDiscCount` | None                                          | Estimated discs for percentage-based progress.   |
 
 ### While it's running
 
@@ -64,16 +75,6 @@ To customize the source drive, destination folder, or file types:
   found on the disc).
 
 ## Testing
-
-Use `-EstimatedDiscCount` to show estimated session completion while files are
-copied:
-
-```powershell
-.\Import-FromDisc.ps1 -Target "C:\Photos\Import" -DriveLetter "D:" -EstimatedDiscCount 20
-```
-
-Without an estimate, progress still shows the current or completed disc count,
-total imported photos, and total errors without a percentage.
 
 Run the tests with Pester 5 or later:
 
