@@ -53,6 +53,20 @@ copied:
 Without an estimate, progress still shows the current or completed disc count,
 total imported photos, and total errors without a percentage.
 
+If a disc has multiple copies of the same photos (e.g. a low-resolution "web"
+folder alongside full-resolution originals), use `-IncludePaths` to scan only
+specific subfolders instead of the whole disc. Paths are relative to the drive
+root and are still scanned recursively (so subfolders within them are
+included), and you can specify more than one:
+
+```powershell
+./Import-FromDisc.ps1 -IncludePaths "DCIM\100CANON", "Photos\Originals"
+```
+
+This applies to every disc processed during the run. If a specified path
+doesn't exist on a given disc, it's logged with a `WARN` status and skipped —
+the rest of the include paths (and the disc) are still processed.
+
 ### Parameters
 
 | Parameter             | Default                                     | Description                                      |
@@ -61,6 +75,7 @@ total imported photos, and total errors without a percentage.
 | `-DriveLetter`        | `D:`                                          | Drive letter to watch for discs.                  |
 | `-Extensions`         | `*.jpg`, `*.jpeg`, `*.tif`, `*.tiff`, `*.png` | File patterns to copy from each disc.             |
 | `-EstimatedDiscCount` | None                                          | Estimated discs for percentage-based progress.   |
+| `-IncludePaths`       | None (whole disc)                            | Relative subfolder(s) to scan recursively instead of the whole disc; applies to every disc this run. |
 
 ### While it's running
 
@@ -71,8 +86,8 @@ total imported photos, and total errors without a percentage.
 - After a disc finishes copying, eject it and insert the next one — the
   script keeps watching the same drive letter.
 - Every action is appended to `_import_log.csv` in the target folder, with a
-  `Status` of `OK`, `HASH_MISMATCH`, `ERROR`, or `EMPTY` (no matching files
-  found on the disc).
+  `Status` of `OK`, `HASH_MISMATCH`, `ERROR`, `WARN` (e.g. a missing
+  `-IncludePaths` folder), or `EMPTY` (no matching files found on the disc).
 
 ## Testing
 
