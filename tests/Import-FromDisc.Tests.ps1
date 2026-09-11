@@ -55,3 +55,37 @@ Describe "Copy-VerifiedFile" {
         Test-Path -LiteralPath $destination | Should -BeTrue
     }
 }
+
+Describe "Write-SessionProgress" {
+    BeforeEach {
+        Mock Write-Progress
+    }
+
+    It "shows useful totals without an estimated disc count" {
+        Write-SessionProgress -CompletedDiscs 2 -ImportedPhotos 1240 -Errors 3
+
+        Should -Invoke Write-Progress -Times 1 -Exactly -ParameterFilter {
+            $Status -eq "2 discs completed, 1240 photos imported, 3 errors" -and
+            $PercentComplete -eq -1
+        }
+    }
+
+    It "includes current file progress in the estimated percentage" {
+        Write-SessionProgress -CompletedDiscs 1 -ImportedPhotos 150 -Errors 2 `
+            -CurrentFile 5 -CurrentFileCount 10 -EstimatedDiscCount 4
+
+        Should -Invoke Write-Progress -Times 1 -Exactly -ParameterFilter {
+            $Status -eq "Disc 2 of ~4, file 5 of 10, 150 photos imported, 2 errors" -and
+            $PercentComplete -eq 37
+        }
+    }
+
+    It "caps progress when the actual disc count exceeds the estimate" {
+        Write-SessionProgress -CompletedDiscs 5 -ImportedPhotos 2000 -Errors 4 -EstimatedDiscCount 4
+
+        Should -Invoke Write-Progress -Times 1 -Exactly -ParameterFilter {
+            $Status -eq "Disc 5 of ~4, 2000 photos imported, 4 errors" -and
+            $PercentComplete -eq 100
+        }
+    }
+}

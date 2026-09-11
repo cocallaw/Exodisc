@@ -65,6 +65,16 @@ To customize the source drive, destination folder, or file types:
 
 ## Testing
 
+Use `-EstimatedDiscCount` to show estimated session completion while files are
+copied:
+
+```powershell
+.\Import-FromDisc.ps1 -Target "C:\Photos\Import" -DriveLetter "D:" -EstimatedDiscCount 20
+```
+
+Without an estimate, progress still shows the current or completed disc count,
+total imported photos, and total errors without a percentage.
+
 Run the tests with Pester 5 or later:
 
 ```powershell
